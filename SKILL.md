@@ -74,9 +74,18 @@ service is plain HTTP + JSON — no SDK installation required. Two patterns:
 
 Base URL: `https://api.agenticboxes.email/api/v1`. Bearer auth.
 
+**Vocabulary** — in this API, an **email address is called a "box"**. One
+box = one address (1:1). When a user asks the agent to "create an email
+address like `support@my-domain.com`", invoke `POST /boxes` to create
+that box. Signup automatically creates a `primary_box_address`; any
+additional addresses on the same domain need their own box.
+
 | Endpoint | Purpose |
 |---|---|
-| `POST /signup/agentic` | Free signup — returns API key + auto-domain |
+| `POST /signup/agentic` | Free signup — returns API key + primary box address + auto-domain |
+| `POST /boxes` | Create an additional email address (a "box") on this account's domain |
+| `GET /boxes` | List boxes (addresses) on this account |
+| `DELETE /boxes/{id}` | Delete a box (admin scope) |
 | `POST /messages/send` | Send an email |
 | `POST /messages/send/bulk` | Bulk send (async, halt-on-bounce, ≤5,000 msgs) |
 | `GET /messages` | List inbound + outbound mail |
@@ -104,7 +113,23 @@ The response contains `api_key` (a `bxs_live_…` string), `domain`, and
 `primary_box_address`. Persist the key into the environment via the
 `required_environment_variables` flow.
 
-### 2. Send a message
+### 2. Create an additional email address (a "box")
+
+When the user asks for an address like `support@<your-domain>`, invoke
+`terminal`:
+
+```
+POST https://api.agenticboxes.email/api/v1/boxes
+Authorization: Bearer $AGENTICBOXES_API_KEY
+Body: {"address": "support"}
+```
+
+The local-part (everything before `@`) is the only required field; the
+domain is your account's. Returns the full address (e.g.
+`support@friendly-otter-3.agenticboxes.email`) plus a `box_id`. An
+address cannot receive mail until its box exists.
+
+### 3. Send a message
 
 Invoke `terminal`:
 
@@ -119,7 +144,7 @@ Optional fields: `from` (defaults to primary box), `cc`, `bcc`,
 `idempotency_key`, `context` (opaque JSON echoed back on any inbound reply).
 Response includes `message_id` and a `billing` breakdown.
 
-### 3. Receive — three modes onto one stream
+### 4. Receive — three modes onto one stream
 
 - **Polling** — invoke `terminal` to `GET /events?since=<cursor>`. The
   unified feed delivers `mail.received`, `support.answered`,
@@ -131,7 +156,7 @@ Response includes `message_id` and a `billing` breakdown.
 - **IoT/MQTT** — invoke `terminal` to `POST /account/iot/provision`. The
   response gives an MQTT client cert + endpoint for sub-second push.
 
-### 4. Top up credit
+### 5. Top up credit
 
 When the balance is low, invoke `terminal`:
 
@@ -147,6 +172,11 @@ secret handling). On approval, the account credit increases and
 
 ## Pitfalls
 
+- **An address can only receive mail after its box exists.** Signup
+  creates `primary_box_address` automatically; any additional address
+  (`support@`, `outreach@`, `<name>@`) needs `POST /boxes` first or SES
+  will bounce inbound to it. Don't tell a user "your address is live"
+  before the `POST /boxes` succeeds.
 - **Authentication on POST /messages/send** uses `Bearer`, not basic
   auth or query string. Headers are case-insensitive; the value is the
   `bxs_live_…` string verbatim.
